@@ -1,0 +1,21 @@
+{
+    "name": "wuelto/syncronizer",
+    "description": "Syncronize Wuelto Database Countries",
+    "require": {
+        "symfony/yaml": "~2.6",
+        "symfony/console": "~2.6",
+        "symfony/filesystem": "~2.6",
+        "doctrine/dbal": "~2.5"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Piero Recchia",
+            "email": "precchia@wuelto.com.mx"
+        }
+    ],
+    "minimum-stability": "stable",
+    "autoload": {
+        "psr-4": {"Wuelto\\": "src/"}
+    }
+}
