@@ -10,8 +10,12 @@ use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Filesystem\Exception\IOExceptionInterface;
+use Symfony\Component\Yaml\Parser;
 use Symfony\Component\Yaml\Dumper;
+use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Exception\DumpException;
+use Doctrine\DBAL\Configuration;
+use Doctrine\DBAL\DriverManager;
 
 class MigrateCommand extends Command
 {
@@ -37,7 +41,10 @@ class MigrateCommand extends Command
     {
         $country = $input->getArgument("country");
         if($country) {
+            $this->checkTargetFile($input, $output);
             $this->checkCountryFile($input, $output, $country);
+            $source = $this->getSourceConnection($output, $country);
+            $target = $this->getTargetConnection($output);
             $output->writeln("<info>$country</info>");
         }
     }
@@ -46,7 +53,7 @@ class MigrateCommand extends Command
     {
         if (!$this->fs->exists(__DIR__ . '/../../../config/target.yml')) {
             $helper = $this->getHelper('question');
-            $question = new ConfirmationQuestion('<info>The target configuration file does not exist, want to create? (y):</info> ', true);
+            $question = new ConfirmationQuestion('<info>The target configuration file does not exist, want to create? [y/n](y):</info> ', true);
             if (!$helper->ask($input, $output, $question)) {
                 return;
             }
@@ -72,6 +79,7 @@ class MigrateCommand extends Command
         } catch (IOExceptionInterface $e) {
             $output->writeln("<error>An error occurred while creating file $filename in path " . $e->getPath() . "</error>");
         }
+        $output->writeln('<info>The configuration file target.yml has been created.</info>');
     }
     
     protected function checkCountryFile(InputInterface $input, OutputInterface $output, $country)
@@ -79,7 +87,7 @@ class MigrateCommand extends Command
         $filename = strtolower($country . '.yml');
         if (!$this->fs->exists(__DIR__ . '/../../../config/' . $filename)) {
             $helper = $this->getHelper('question');
-            $question = new ConfirmationQuestion('<info>The configuration file ' . $filename . ' does not exist, want to create? (y):</info> ', true);
+            $question = new ConfirmationQuestion('<info>The configuration file ' . $filename . ' does not exist, want to create? [y/n](y):</info> ', true);
             if (!$helper->ask($input, $output, $question)) {
                 return;
             }
@@ -124,6 +132,55 @@ class MigrateCommand extends Command
         $string = $helper->ask($input, $output, $question);
 
         return $string;
+    }
+    
+    protected function getSourceConnection(OutputInterface $output, $country)
+    {
+        $filename = strtolower($country . '.yml');
+        $yaml = new Parser();
+        try {
+            $_data = $yaml->parse(file_get_contents(__DIR__ . '/../../../config/' . $filename));
+        } catch (ParseException $e) {
+            $output->writeln('<error>Unable to parse the YAML string: ' . $e->getMessage() . '</error>');
+            
+            return false;
+        }
+        $config = new Configuration();
+        $connectionParams = array(
+            'dbname' => $_data['source']['dbname'],
+            'user' => $_data['source']['user'],
+            'password' => $_data['source']['password'],
+            'host' => $_data['source']['host'],
+            'port' => 3306,
+            'charset' => 'utf8',
+            'driver' => 'pdo_mysql',
+        );
+        
+        return DriverManager::getConnection($connectionParams, $config);
+    }
+    
+    protected function getTargetConnection(OutputInterface $output)
+    {
+        $yaml = new Parser();
+        try {
+            $_data = $yaml->parse(file_get_contents(__DIR__ . '/../../../config/target.yml'));
+        } catch (ParseException $e) {
+            $output->writeln('<error>Unable to parse the YAML string: ' . $e->getMessage() . '</error>');
+            
+            return false;
+        }
+        $config = new Configuration();
+        $connectionParams = array(
+            'dbname' => $_data['target']['dbname'],
+            'user' => $_data['target']['user'],
+            'password' => $_data['target']['password'],
+            'host' => $_data['target']['host'],
+            'port' => 3306,
+            'charset' => 'utf8',
+            'driver' => 'pdo_mysql',
+        );
+        
+        return DriverManager::getConnection($connectionParams, $config);
     }
 
 }
