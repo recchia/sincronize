@@ -1,0 +1,6 @@
+## Database Source.
+target:
+    host: 127.0.0.1
+    dbname: null
+    user: null
+    password: null
