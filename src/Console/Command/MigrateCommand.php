@@ -42,6 +42,38 @@ class MigrateCommand extends Command
         }
     }
     
+    protected function checkTargetFile(InputInterface $input, OutputInterface $output)
+    {
+        if (!$this->fs->exists(__DIR__ . '/../../../config/target.yml')) {
+            $helper = $this->getHelper('question');
+            $question = new ConfirmationQuestion('<info>The target configuration file does not exist, want to create? (y):</info> ', true);
+            if (!$helper->ask($input, $output, $question)) {
+                return;
+            }
+            $this->createTargetFile($input, $output);
+        }
+        
+        return;
+    }
+    
+    protected function createTargetFile(InputInterface $input, OutputInterface $output)
+    {
+        $host = $this->doQuestion($input, $output, 'Please enter the host: ', 'Must enter a hostname or IP');
+        $dbname = $this->doQuestion($input, $output, 'Please enter the database name: ', 'Must enter a database name');
+        $user = $this->doQuestion($input, $output, 'Please enter the username: ', 'Must enter a username');
+        $password = $this->doQuestion($input, $output, 'Please enter the password: ', 'Must enter a password');
+        $config = array('source' => array('host' => $host, 'dbname' => $dbname, 'user' => $user, 'password' => $password));
+        try {
+            $dumper = new Dumper();
+            $yaml = $dumper->dump($config, 2);
+            $this->fs->dumpFile(__DIR__ . '/../../../config/target.yml', $yaml);
+        } catch (DumpException $e) {
+            $output->writeln("<error>An error occurred while dumping configuration " . $e->getMessage() . "</error>");
+        } catch (IOExceptionInterface $e) {
+            $output->writeln("<error>An error occurred while creating file $filename in path " . $e->getPath() . "</error>");
+        }
+    }
+    
     protected function checkCountryFile(InputInterface $input, OutputInterface $output, $country)
     {
         $filename = strtolower($country . '.yml');
@@ -73,6 +105,7 @@ class MigrateCommand extends Command
         } catch (IOExceptionInterface $e) {
             $output->writeln("<error>An error occurred while creating file $filename in path " . $e->getPath() . "</error>");
         }
+        $output->writeln('<info>The configuration file '. $filename .' has been created.</info>');
     }
 
     protected function doQuestion(InputInterface $input, OutputInterface $output, $question, $errorMsg)
