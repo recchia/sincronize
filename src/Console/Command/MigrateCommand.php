@@ -8,6 +8,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Filesystem\Exception\IOExceptionInterface;
 use Symfony\Component\Yaml\Parser;
@@ -16,6 +17,8 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Exception\DumpException;
 use Doctrine\DBAL\Configuration;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Exception\ConnectionException;
+use Doctrine\DBAL\Driver\PDOException;
 
 class MigrateCommand extends Command
 {
@@ -40,15 +43,23 @@ class MigrateCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output)
     {
         $country = $input->getArgument("country");
-        if($country) {
+        if ($country) {
             $this->checkTargetFile($input, $output);
             $this->checkCountryFile($input, $output, $country);
             $source = $this->getSourceConnection($output, $country);
             $target = $this->getTargetConnection($output);
-            $output->writeln("<info>$country</info>");
+            try {
+                $sth = $source->query("SELECT count(id) AS total FROM wl_users");
+                $total = $sth->fetchColumn();
+                $output->writeln("<info>$total Usuarios</info>");
+            } catch (ConnectionException $e) {
+                $output->writeln('<error>' . $e->getMessage() . '</error>');
+            } catch (PDOException $e) {
+                $output->writeln('<error>' . $e->getMessage() . '</error>');
+            }
         }
     }
-    
+
     protected function checkTargetFile(InputInterface $input, OutputInterface $output)
     {
         if (!$this->fs->exists(__DIR__ . '/../../../config/target.yml')) {
