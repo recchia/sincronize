@@ -51,9 +51,7 @@ class MigrateCommand extends Command
             $target = $this->getTargetConnection($output);
             try {
                 $this->createIdColumns($output, $target);
-                $sth = $source->query("SELECT count(id) AS total FROM wl_users");
-                $total = $sth->fetchColumn();
-                $output->writeln("<info>$total Usuarios</info>");
+                $this->executeFirstPhaseMigration($source, $target, $output);
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
@@ -230,6 +228,24 @@ class MigrateCommand extends Command
         $progress->display();
         $progress->finish();
         $output->writeln('');
+    }
+    
+    protected function executeFirstPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('');
+        $sth = $source->query("SELECT count(id) AS total FROM wl_users");
+        $total = $sth->fetchColumn();
+        $bar = new ProgressBar($output, $total);
+        $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+        $bar->setMessage('<comment>Migrating users, stores and products...</comment>');
+        $stmt = $source->query("SELECT * FROM wl_users");
+        $bar->start();
+        while ($row = $stmt->fetch()) {
+            $bar->advance();
+        }
+        $bar->finish();
+        $output->writeln('');
+        $output->writeln("<info>$total Usuarios</info>");
     }
 
 }
