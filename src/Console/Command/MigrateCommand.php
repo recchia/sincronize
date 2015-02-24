@@ -19,6 +19,7 @@ use Doctrine\DBAL\Configuration;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception\ConnectionException;
 use Doctrine\DBAL\Driver\PDOException;
+use Doctrine\DBAL\Exception\InvalidFieldNameException;
 
 class MigrateCommand extends Command
 {
@@ -56,6 +57,8 @@ class MigrateCommand extends Command
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
+                $output->writeln('<error>' . $e->getMessage() . '</error>');
+            } catch (InvalidFieldNameException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             }
         }
@@ -197,29 +200,36 @@ class MigrateCommand extends Command
     
     protected function createIdColumns(OutputInterface $output, $target)
     {
+        $output->writeln('');
         $_tables = array('users' => 'wl_users', 'shops' => 'wl_shops', 'items' => 'wl_items');
         $_lastFields = array('users' => 'seller_ratings', 'shops' => 'created_on', 'items' => 'bm_redircturl');
-        $output->writeln('<comment>Verifying special columns...</comment>');
         $progress = new ProgressBar($output, 3);
+        $progress->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
         $progress->setMessage("Verifying special columns");
         $progress->start();
         foreach ($_tables as $key => $value) {
             $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'wuelto' AND TABLE_NAME = '$value' AND COLUMN_NAME = 'old_id';");
             $exist = $sth->fetchColumn();
             if (!$exist) {
+                $progress->clear();
                 $progress->setMessage("The field does not exist in the table $key, creating...");
-                $sth = $target->query("ALTER TABLE `wuelto`.`wl_users` ADD COLUMN `old_id` INT(32) NULL AFTER `{$_lastFields[$key]}`;");
+                $progress->display();
+                $sth = $target->query("ALTER TABLE `wuelto`.`$value` ADD COLUMN `old_id` INT(32) NULL AFTER `{$_lastFields[$key]}`;");
+                $progress->clear();
                 $progress->setMessage("The field was created in the table $key");
-
-                return;
+                $progress->display();
             } else {
+                $progress->clear();
                 $progress->setMessage("The field already exists in the $key table");
+                $progress->display();
             }
             $progress->advance();
         }
+        $progress->clear();
+        $progress->setMessage('<comment>Verification finished.</comment>');
+        $progress->display();
         $progress->finish();
         $output->writeln('');
-        $output->writeln('<comment>Verification finished.</comment>');
     }
 
 }
