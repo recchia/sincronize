@@ -49,6 +49,7 @@ class MigrateCommand extends Command
             $source = $this->getSourceConnection($output, $country);
             $target = $this->getTargetConnection($output);
             try {
+                $this->createIdColumns($output, $target);
                 $sth = $source->query("SELECT count(id) AS total FROM wl_users");
                 $total = $sth->fetchColumn();
                 $output->writeln("<info>$total Usuarios</info>");
@@ -192,6 +193,33 @@ class MigrateCommand extends Command
         );
         
         return DriverManager::getConnection($connectionParams, $config);
+    }
+    
+    protected function createIdColumns(OutputInterface $output, $target)
+    {
+        $_tables = array('users' => 'wl_users', 'shops' => 'wl_shops', 'items' => 'wl_items');
+        $_lastFields = array('users' => 'seller_ratings', 'shops' => 'created_on', 'items' => 'bm_redircturl');
+        $output->writeln('<comment>Verifying special columns...</comment>');
+        $progress = new ProgressBar($output, 3);
+        $progress->setMessage("Verifying special columns");
+        $progress->start();
+        foreach ($_tables as $key => $value) {
+            $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'wuelto' AND TABLE_NAME = '$value' AND COLUMN_NAME = 'old_id';");
+            $exist = $sth->fetchColumn();
+            if (!$exist) {
+                $progress->setMessage("The field does not exist in the table $key, creating...");
+                $sth = $target->query("ALTER TABLE `wuelto`.`wl_users` ADD COLUMN `old_id` INT(32) NULL AFTER `{$_lastFields[$key]}`;");
+                $progress->setMessage("The field was created in the table $key");
+
+                return;
+            } else {
+                $progress->setMessage("The field already exists in the $key table");
+            }
+            $progress->advance();
+        }
+        $progress->finish();
+        $output->writeln('');
+        $output->writeln('<comment>Verification finished.</comment>');
     }
 
 }
