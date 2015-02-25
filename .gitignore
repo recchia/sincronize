@@ -1,4 +1,4 @@
 /vendor
 /nbproject
 /config/*.yml
-/log/*
+*.log
