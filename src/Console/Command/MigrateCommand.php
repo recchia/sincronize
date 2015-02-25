@@ -277,6 +277,9 @@ class MigrateCommand extends Command
                             $this->Log($this->dbName, "Couldn't save the shop {$shop['shop_name']} with Id {$shop['id']}");
                         } else {
                             $items = $this->getItems($source, $user['id'], $shop['id']);
+                            if (count($items) > 0) {
+                                $this->insertItems($target, $items, $new_user_id, $new_shop_id);
+                            }
                         }
                     }
                 }
@@ -314,6 +317,10 @@ class MigrateCommand extends Command
             'password' => $row['password'],
             'email' => $row['email'],
             'city' => $row['city'],
+            'country' => $$this->countryId,
+            'selected_country' => '["' . $this->countryId . '"]',
+            'currency_id' => $this->currencyId,
+            'currencyId' => $this->currencyId,
             'website' => $row['website'],
             'birthday' => $row['birthday'],
             'age_between' => $row['age_between'],
@@ -421,6 +428,47 @@ class MigrateCommand extends Command
         $items = $source->executeQuery($query, array($user_id, $shop_id));
         
         return $items->fetchAll(\PDO::FETCH_ASSOC);
+    }
+    
+    protected function insertItems(\Doctrine\DBAL\Connection $target, $items, $new_user_id, $new_shop_id)
+    {
+        foreach ($items as $item) {
+            $_values = array(
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+                'user_id' => $item['user_id'],
+            );
+        }
     }
 
 }
