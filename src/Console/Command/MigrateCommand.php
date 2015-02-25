@@ -48,6 +48,9 @@ class MigrateCommand extends Command
     
     protected function Log($name, $message)
     {
+        if (!$this->fs->exists(__DIR__ . '/../../../log')) {
+            $this->fs->mkdir(__DIR__ . '/../../../log');
+        }
         $log = new Logger($name);
         $log->pushHandler(new StreamHandler(__DIR__ . '/../../../log/' . $name . '.log', Logger::WARNING));
         $log->addWarning($message);
