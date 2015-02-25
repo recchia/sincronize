@@ -24,6 +24,8 @@ use Doctrine\DBAL\Exception\InvalidFieldNameException;
 class MigrateCommand extends Command
 {
     private $fs;
+    private $countryId;
+    private $currencyId;
     
     public function __construct($name = null)
     {
@@ -116,7 +118,9 @@ class MigrateCommand extends Command
         $dbname = $this->doQuestion($input, $output, 'Please enter the database name: ', 'Must enter a database name');
         $user = $this->doQuestion($input, $output, 'Please enter the username: ', 'Must enter a username');
         $password = $this->doQuestion($input, $output, 'Please enter the password: ', 'Must enter a password');
-        $config = array('source' => array('host' => $host, 'dbname' => $dbname, 'user' => $user, 'password' => $password));
+        $country_id = (int)$this->doQuestion($input, $output, 'Please enter the country id:', 'Must enter a country id');
+        $currency_id = (int)$this->doQuestion($input, $output, 'Please enter the currency id:', 'Must enter a currency id');
+        $config = array('source' => array('host' => $host, 'dbname' => $dbname, 'user' => $user, 'password' => $password, 'country_id' => $country_id, 'currency_id' => $currency_id));
         try {
             $dumper = new Dumper();
             $yaml = $dumper->dump($config, 2);
@@ -168,6 +172,8 @@ class MigrateCommand extends Command
             'charset' => 'utf8',
             'driver' => 'pdo_mysql',
         );
+        $this->countryId = $_data['source']['country_id'];
+        $this->currencyId = $_data['source']['currency_id'];
         
         return DriverManager::getConnection($connectionParams, $config);
     }
