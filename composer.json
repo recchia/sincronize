@@ -5,7 +5,8 @@
         "symfony/yaml": "~2.6",
         "symfony/console": "~2.6",
         "symfony/filesystem": "~2.6",
-        "doctrine/dbal": "~2.5"
+        "doctrine/dbal": "~2.5",
+        "monolog/monolog": "~1.12"
     },
     "license": "MIT",
     "authors": [

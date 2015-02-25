@@ -20,12 +20,15 @@ use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception\ConnectionException;
 use Doctrine\DBAL\Driver\PDOException;
 use Doctrine\DBAL\Exception\InvalidFieldNameException;
+use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
 
 class MigrateCommand extends Command
 {
     private $fs;
     private $countryId;
     private $currencyId;
+    private $dbName;
     
     public function __construct($name = null)
     {
@@ -43,7 +46,14 @@ class MigrateCommand extends Command
         ;
     }
     
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function Log($name, $message)
+    {
+        $log = new Logger($name);
+        $log->pushHandler(new StreamHandler(__DIR__ . '/../../../log/' . $name . '.log', Logger::WARNING));
+        $log->addWarning($message);
+    }
+
+        protected function execute(InputInterface $input, OutputInterface $output)
     {
         $country = $input->getArgument("country");
         if ($country) {
@@ -59,6 +69,8 @@ class MigrateCommand extends Command
             } catch (PDOException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (InvalidFieldNameException $e) {
+                $output->writeln('<error>' . $e->getMessage() . '</error>');
+            } catch (\Doctrine\DBAL\Exception\SyntaxErrorException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             }
         }
@@ -172,6 +184,7 @@ class MigrateCommand extends Command
             'charset' => 'utf8',
             'driver' => 'pdo_mysql',
         );
+        $this->dbName = $_data['source']['dbname'];
         $this->countryId = $_data['source']['country_id'];
         $this->currencyId = $_data['source']['currency_id'];
         
@@ -230,7 +243,7 @@ class MigrateCommand extends Command
             $progress->advance();
         }
         $progress->clear();
-        $progress->setMessage('<comment>Verification finished.</comment>');
+        $progress->setMessage('<comment>Verification finished. Special fields are ok</comment>');
         $progress->display();
         $progress->finish();
         $output->writeln('');
@@ -244,14 +257,31 @@ class MigrateCommand extends Command
         $bar = new ProgressBar($output, $total);
         $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
         $bar->setMessage('<comment>Migrating users, stores and products...</comment>');
-        $stmt = $source->query("SELECT * FROM wl_users");
+        $stmt = $source->query($this->getUserQuery());
         $bar->start();
         while ($row = $stmt->fetch()) {
+            $this->Log($this->dbName, $row['id'] . '-' . $row['username']);
             $bar->advance();
         }
         $bar->finish();
         $output->writeln('');
         $output->writeln("<info>$total Usuarios</info>");
+    }
+    
+    protected function getUserQuery()
+    {
+        $query = "SELECT `wl_users`.`id`, `wl_users`.`username`, `wl_users`.`username_url`, `wl_users`.`first_name`, `wl_users`.`last_name`, ";
+        $query.= "`wl_users`.`password`, `wl_users`.`email`, `wl_users`.`city`, `wl_users`.`website`, `wl_users`.`birthday`, `wl_users`.`age_between`, ";
+        $query.= "`wl_users`.`user_level`, `wl_users`.`user_status`, `wl_users`.`profile_image`, `wl_users`.`location`, `wl_users`.`about`, ";
+        $query.= "`wl_users`.`created_at`, `wl_users`.`modified_at`, `wl_users`.`follow_count`, `wl_users`.`login_type`, `wl_users`.`facebook_id`, ";
+        $query.= "`wl_users`.`token_key`, `wl_users`.`secret_key`, `wl_users`.`twitter_id`, `wl_users`.`twitter`, `wl_users`.`google_id`, ";
+        $query.= "`wl_users`.`facebook_session`, `wl_users`.`twitter_session`, `wl_users`.`referrer_id`, `wl_users`.`credit_total`, `wl_users`.`refer_key`, ";
+        $query.= "`wl_users`.`gender`, `wl_users`.`user_address`, `wl_users`.`last_login`, `wl_users`.`activation`, `wl_users`.`subs`, ";
+        $query.= "`wl_users`.`someone_follow`, `wl_users`.`someone_show`, `wl_users`.`someone_cmnt_ur_things`, `wl_users`.`your_thing_featured`, ";
+        $query.= "`wl_users`.`someone_mention_u`, `wl_users`.`push_notifications`, `wl_users`.`unread_notify_cnt`, `wl_users`.`featureditemid`, ";
+        $query.= "`wl_users`.`defaultshipping`, `wl_users`.`user_api_details`, `wl_users`.`seller_ratings` FROM `{$this->dbName}`.`wl_users`";
+        
+        return $query;
     }
 
 }
