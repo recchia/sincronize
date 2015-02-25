@@ -56,7 +56,7 @@ class MigrateCommand extends Command
         $log->addWarning($message);
     }
 
-        protected function execute(InputInterface $input, OutputInterface $output)
+    protected function execute(InputInterface $input, OutputInterface $output)
     {
         $country = $input->getArgument("country");
         if ($country) {
@@ -260,18 +260,35 @@ class MigrateCommand extends Command
         $bar = new ProgressBar($output, $total);
         $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
         $bar->setMessage('<comment>Migrating users, stores and products...</comment>');
-        $stmt = $source->query($this->getUserQuery());
+        $stmt = $source->query($this->getUsersQuery());
         $bar->start();
-        while ($row = $stmt->fetch()) {
-            $this->Log($this->dbName, $row['id'] . '-' . $row['username']);
+        while ($user = $stmt->fetch()) {
+            $sth = $target->executeQuery('SELECT count(id) as "count" FROM wl_users WHERE email = ?', array($user['email']));
+            $count = $sth->fetchColumn();
+            if ($count == 0) {
+                $new_user_id = $this->insertUsert($user, $target);
+                if (!$new_user_id) {
+                    $this->Log($this->dbName, "Couldn't save the user {$user['email']} with Id {$user['id']}");
+                } else {
+                    $shop = $this->getShop($source, $user['id']);
+                    if (count($shop) > 0) {
+                        $new_shop_id = $this->insertShop($target, $shop, $new_user_id);
+                        if (!$new_shop_id) {
+                            $this->Log($this->dbName, "Couldn't save the shop {$shop['shop_name']} with Id {$shop['id']}");
+                        } else {
+                            $items = $this->getItems($source, $user['id'], $shop['id']);
+                        }
+                    }
+                }
+            }
             $bar->advance();
         }
         $bar->finish();
         $output->writeln('');
         $output->writeln("<info>$total Usuarios</info>");
     }
-    
-    protected function getUserQuery()
+
+    protected function getUsersQuery()
     {
         $query = "SELECT `wl_users`.`id`, `wl_users`.`username`, `wl_users`.`username_url`, `wl_users`.`first_name`, `wl_users`.`last_name`, ";
         $query.= "`wl_users`.`password`, `wl_users`.`email`, `wl_users`.`city`, `wl_users`.`website`, `wl_users`.`birthday`, `wl_users`.`age_between`, ";
@@ -285,6 +302,125 @@ class MigrateCommand extends Command
         $query.= "`wl_users`.`defaultshipping`, `wl_users`.`user_api_details`, `wl_users`.`seller_ratings` FROM `{$this->dbName}`.`wl_users`";
         
         return $query;
+    }
+    
+    protected function insertUsert($row, \Doctrine\DBAL\Connection $target)
+    {
+        $_values = array(
+            'username' => $row['username'],
+            'username_url' => $row['username_url'],
+            'first_name' => $row['first_name'],
+            'last_name' => $row['last_name'],
+            'password' => $row['password'],
+            'email' => $row['email'],
+            'city' => $row['city'],
+            'website' => $row['website'],
+            'birthday' => $row['birthday'],
+            'age_between' => $row['age_between'],
+            'user_level' => $row['user_level'],
+            'user_status' => $row['user_status'],
+            'profile_image' => $row['profile_image'],
+            'about' => $row['about'],
+            'created_at' => $row['created_at'],
+            'modified_at' => $row['modified_at'],
+            'follow_count' => $row['follow_count'],
+            'login_type' => $row['login_type'],
+            'facebook_id' => $row['facebook_id'],
+            'token_key' => $row['token_key'],
+            'secret_key' => $row['secret_key'],
+            'twitter_id' => $row['twitter_id'],
+            'twitter' => $row['twitter'],
+            'google_id' => $row['google_id'],
+            'facebook_session' => $row['facebook_session'],
+            'twitter_session' => $row['twitter_session'],
+            'referrer_id' => $row['referrer_id'],
+            'credit_total' => $row['credit_total'],
+            'refer_key' => $row['refer_key'],
+            'gender' => $row['gender'],
+            'user_address' => $row['user_address'],
+            'last_login' => $row['last_login'],
+            'activation' => $row['activation'],
+            'subs' => $row['subs'],
+            'someone_follow' => $row['someone_follow'],
+            'someone_show' => $row['someone_show'],
+            'someone_cmnt_ur_things' => $row['someone_cmnt_ur_things'],
+            'your_thing_featured' => $row['your_thing_featured'],
+            'someone_mention_u' => $row['someone_mention_u'],
+            'push_notifications' => $row['push_notifications'],
+            'unread_notify_cnt' => $row['unread_notify_cnt'],
+            'featureditemid' => $row['featureditemid'],
+            'defaultshipping' => $row['defaultshipping'],
+            'user_api_details' => $row['user_api_details'],
+            'seller_ratings' => $row['seller_ratings'],
+            'old_id' => $row['id']
+        );
+        if (!$target->insert('wl_users', $_values)) {
+            return false;
+        } else {
+            return $target->lastInsertId();
+        }
+    }
+    
+    protected function getShop(\Doctrine\DBAL\Connection $source, $user_id)
+    {
+        $query = "SELECT `wl_shops`.`id`, `wl_shops`.`user_id`, `wl_shops`.`shop_name`, `wl_shops`.`shop_title`, `wl_shops`.`desc`, `wl_shops`.`shop_image`, ";
+        $query.= "`wl_shops`.`shop_banner`, `wl_shops`.`shop_announcement`, `wl_shops`.`shop_message`, `wl_shops`.`shop_address`, `wl_shops`.`shop_latitude`, ";
+        $query.= "`wl_shops`.`shop_longitude`, `wl_shops`.`item_count`, `wl_shops`.`follow_count`, `wl_shops`.`welcome_message`, `wl_shops`.`payment_policy`, ";
+        $query.= "`wl_shops`.`shipping_policy`, `wl_shops`.`refund_policy`, `wl_shops`.`additional_info`, `wl_shops`.`seller_info`, `wl_shops`.`phone_no`, ";
+        $query.= "`wl_shops`.`paypal_id`, `wl_shops`.`seller_status`, `wl_shops`.`created_on` FROM `{$this->dbName}`.`wl_shops` WHERE `wl_shops`.`user_id` = ?";
+        $shop = $source->executeQuery($query, array($user_id));
+        
+        return $shop->fetch(\PDO::FETCH_ASSOC);
+    }
+    
+    protected function insertShop(\Doctrine\DBAL\Connection $target, $shop, $new_user_id)
+    {
+        $_values = array(
+            'user_id' => $user_id,
+            'shop_name' => $shop['shop_name'],
+            'shop_title' => $shop['shop_title'],
+            'desc' => $shop['desc'],
+            'shop_image' => $shop['shop_image'],
+            'shop_banner' => $shop['shop_banner'],
+            'shop_announcement' => $shop['shop_announcement'],
+            'shop_message' => $shop['shop_message'],
+            'shop_address' => $shop['shop_address'],
+            'shop_latitude' => $shop['shop_latitude'],
+            'shop_longitude' => $shop['shop_longitude'],
+            'item_count' => $shop['item_count'],
+            'follow_count' => $shop['follow_count'],
+            'welcome_message' => $shop['welcome_message'],
+            'payment_policy' => $shop['payment_policy'],
+            'shipping_policy' => $shop['shipping_policy'],
+            'refund_policy' => $shop['refund_policy'],
+            'additional_info' => $shop['additional_info'],
+            'seller_info' => $shop['seller_info'],
+            'phone_no' => $shop['phone_no'],
+            'paypal_id' => $shop['paypal_id'],
+            'seller_status' => $shop['seller_status'],
+            'created_on' => $shop['created_on'],
+            'shop_name' => $shop['shop_name'],
+            'old_id' => $shop['id']
+        );
+        if (!$target->insert('wl_shops', $_values)) {
+            return false;
+        } else {
+            return $target->lastInsertId();
+        }
+    }
+    
+    protected function getItems(\Doctrine\DBAL\Connection $source, $user_id, $shop_id)
+    {
+        $query = "SELECT `wl_items`.`id`, `wl_items`.`user_id`, `wl_items`.`shop_id`, `wl_items`.`item_title`, `wl_items`.`item_title_url`, ";
+        $query.= "`wl_items`.`item_description`, `wl_items`.`recipient`, `wl_items`.`occasion`, `wl_items`.`style`, `wl_items`.`tags`, `wl_items`.`materials`, ";
+        $query.= "`wl_items`.`price`, `wl_items`.`quantity`, `wl_items`.`quantity_sold`, `wl_items`.`collection_id`, `wl_items`.`collection_name`, ";
+        $query.= "`wl_items`.`category_id`, `wl_items`.`general_category`, `wl_items`.`super_catid`, `wl_items`.`sub_catid`, `wl_items`.`ship_from_country`, ";
+        $query.= "`wl_items`.`processing_time`, `wl_items`.`size_options`, `wl_items`.`status`, `wl_items`.`created_on`, `wl_items`.`modified_on`, ";
+        $query.= "`wl_items`.`item_color`, `wl_items`.`featured`, `wl_items`.`fav_count`, `wl_items`.`comment_count`, `wl_items`.`hashtag`, ";
+        $query.= "`wl_items`.`report_flag`, `wl_items`.`bm_redircturl` FROM `{$this->dbName}`.`wl_items` WHERE `wl_items`.`user_id` = ? AND `wl_items`.`shop_id` = ?";
+        $items = $source->executeQuery($query, array($user_id, $shop_id));
+        
+        return $items->fetchAll(\PDO::FETCH_ASSOC);
     }
 
 }
