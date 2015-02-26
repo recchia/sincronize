@@ -254,7 +254,7 @@ class MigrateCommand extends Command
     
     protected function executeFirstPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        $output->writeln('');
+        $output->writeln(''); $success = 0; $fails = 0;
         $sth = $source->query("SELECT count(id) AS total FROM wl_users");
         $total = $sth->fetchColumn();
         $bar = new ProgressBar($output, $total);
@@ -263,32 +263,36 @@ class MigrateCommand extends Command
         $stmt = $source->query($this->getUsersQuery());
         $bar->start();
         while ($user = $stmt->fetch()) {
-            $sth = $target->executeQuery('SELECT count(id) as "count" FROM wl_users WHERE email = ?', array($user['email']));
-            $count = $sth->fetchColumn();
-            if ($count == 0) {
-                $new_user_id = $this->insertUsert($user, $target);
-                if (!$new_user_id) {
-                    $this->Log($this->dbName, "Couldn't save the user {$user['email']} with Id {$user['id']}");
-                } else {
+            $target->beginTransaction();
+            try {
+                $sth = $target->executeQuery('SELECT count(id) as "count" FROM wl_users WHERE email = ?', array($user['email']));
+                $count = $sth->fetchColumn();
+                if ($count == 0) {
+                    $new_user_id = $this->insertUsert($user, $target);
                     $shop = $this->getShop($source, $user['id']);
                     if (count($shop) > 0) {
                         $new_shop_id = $this->insertShop($target, $shop, $new_user_id);
-                        if (!$new_shop_id) {
-                            $this->Log($this->dbName, "Couldn't save the shop {$shop['shop_name']} with Id {$shop['id']}");
-                        } else {
-                            $items = $this->getItems($source, $user['id'], $shop['id']);
-                            if (count($items) > 0) {
-                                $this->insertItems($target, $items, $new_user_id, $new_shop_id);
-                            }
+                        $items = $this->getItems($source, $user['id'], $shop['id']);
+                        if (count($items) > 0) {
+                            $this->insertItems($target, $items, $new_user_id, $new_shop_id);
                         }
                     }
                 }
+                $target->commit();
+                $success += 1;
+            } catch (\Exception $exc) {
+                $target->rollBack();
+                $fails += 1;
+                $this->Log($this->dbName, "Couldn't save user {$user['email']} with Id {$user['id']} and his data. Info: " . $exc->getMessage());
             }
             $bar->advance();
         }
         $bar->finish();
         $output->writeln('');
-        $output->writeln("<info>$total Usuarios</info>");
+        $output->writeln("<info>Users Total: $total</info>");
+        $output->writeln("<info>Users Migrated: $success</info>");
+        $output->writeln("<info>Users Not Migrared: $fails</info>");
+        $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
     }
 
     protected function getUsersQuery()
@@ -361,11 +365,9 @@ class MigrateCommand extends Command
             'seller_ratings' => $row['seller_ratings'],
             'old_id' => $row['id']
         );
-        if (!$target->insert('wl_users', $_values)) {
-            return false;
-        } else {
-            return $target->lastInsertId();
-        }
+        $target->insert('wl_users', $_values);
+        
+        return $target->lastInsertId();
     }
     
     protected function getShop(\Doctrine\DBAL\Connection $source, $user_id)
@@ -383,7 +385,7 @@ class MigrateCommand extends Command
     protected function insertShop(\Doctrine\DBAL\Connection $target, $shop, $new_user_id)
     {
         $_values = array(
-            'user_id' => $user_id,
+            'user_id' => $new_user_id,
             'shop_name' => $shop['shop_name'],
             'shop_title' => $shop['shop_title'],
             'desc' => $shop['desc'],
@@ -409,11 +411,9 @@ class MigrateCommand extends Command
             'shop_name' => $shop['shop_name'],
             'old_id' => $shop['id']
         );
-        if (!$target->insert('wl_shops', $_values)) {
-            return false;
-        } else {
-            return $target->lastInsertId();
-        }
+        $target->insert('wl_shops', $_values);
+        
+        return $target->lastInsertId();
     }
     
     protected function getItems(\Doctrine\DBAL\Connection $source, $user_id, $shop_id)
@@ -468,11 +468,33 @@ class MigrateCommand extends Command
                 'bm_redircturl' => $item['bm_redircturl'],
                 'old_id' => $item['id']
             );
-            if (!$target->insert('wl_items', $_values)) {
-                return false;
-            } else {
-                $new_item_id = $target->lastInsertId();
+            $target->insert('wl_items', $_values);
+            $new_item_id = $target->lastInsertId();
+            $photos = $this->getPhotos($target, $item['id']);
+            if (count($photos) > 0) {
+                $this->insertPhotos($target, $photos, $new_item_id);
             }
+        }
+    }
+    
+    protected function getPhotos(\Doctrine\DBAL\Connection $source, $item_id)
+    {
+        $query = "SELECT `wl_photos`.`id`, `wl_photos`.`item_id`, `wl_photos`.`image_name`, `wl_photos`.`created_on` FROM `{$this->dbName}`.`wl_photos ";
+        $query.= "WHERE `wl_photos`.`item_id` = ?";
+        $photos = $source->executeQuery($query, array($item_id));
+        
+        $photos->fetchAll(\PDO::FETCH_ASSOC);
+    }
+    
+    protected function insertPhotos(\Doctrine\DBAL\Connection $target, $photos, $new_item_id)
+    {
+        foreach ($photos as $photo) {
+            $_values = array(
+                'item_id' => $new_item_id,
+                'image_name' => $photo['image_name'],
+                'created_on' => $photo['created_on']
+            );
+            $target->insert('wl_photos', $_values);
         }
     }
 
