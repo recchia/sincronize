@@ -254,7 +254,10 @@ class MigrateCommand extends Command
     
     protected function executeFirstPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        $output->writeln(''); $success = 0; $fails = 0;
+        $output->writeln('');
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
         $sth = $source->query("SELECT count(id) AS total FROM wl_users");
         $total = $sth->fetchColumn();
         $bar = new ProgressBar($output, $total);
@@ -263,8 +266,8 @@ class MigrateCommand extends Command
         $stmt = $source->query($this->getUsersQuery());
         $bar->start();
         while ($user = $stmt->fetch()) {
-            $target->beginTransaction();
             try {
+                $target->beginTransaction();
                 $sth = $target->executeQuery('SELECT count(id) as "count" FROM wl_users WHERE email = ?', array($user['email']));
                 $count = $sth->fetchColumn();
                 if ($count == 0) {
@@ -277,13 +280,15 @@ class MigrateCommand extends Command
                             $this->insertItems($target, $items, $new_user_id, $new_shop_id);
                         }
                     }
+                    $success += 1;
+                } else {
+                    $exist += 1;
                 }
                 $target->commit();
-                $success += 1;
             } catch (\Exception $exc) {
                 $target->rollBack();
                 $fails += 1;
-                $this->Log($this->dbName, "Couldn't save user {$user['email']} with Id {$user['id']} and his data. Info: " . $exc->getMessage());
+                $this->Log($this->dbName, "Couldn't save user {$user['email']} with Id {$user['id']}. Info: " . $exc->getMessage());
             }
             $bar->advance();
         }
@@ -291,8 +296,11 @@ class MigrateCommand extends Command
         $output->writeln('');
         $output->writeln("<info>Users Total: $total</info>");
         $output->writeln("<info>Users Migrated: $success</info>");
-        $output->writeln("<info>Users Not Migrared: $fails</info>");
-        $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+        $output->writeln("<info>Existing users: $exist</info>");
+        $output->writeln("<info>Users Not Migrated: $fails</info>");
+        if ($fails > 0) {
+            $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+        }
     }
 
     protected function getUsersQuery()
@@ -321,7 +329,7 @@ class MigrateCommand extends Command
             'password' => $row['password'],
             'email' => $row['email'],
             'city' => $row['city'],
-            'country' => $$this->countryId,
+            'country' => $this->countryId,
             'selected_country' => '["' . $this->countryId . '"]',
             'currency_id' => $this->currencyId,
             'currencyId' => $this->currencyId,
@@ -372,7 +380,7 @@ class MigrateCommand extends Command
     
     protected function getShop(\Doctrine\DBAL\Connection $source, $user_id)
     {
-        $query = "SELECT `wl_shops`.`id`, `wl_shops`.`user_id`, `wl_shops`.`shop_name`, `wl_shops`.`shop_title`, `wl_shops`.`desc`, `wl_shops`.`shop_image`, ";
+        $query = "SELECT `wl_shops`.`id`, `wl_shops`.`user_id`, `wl_shops`.`shop_name`, `wl_shops`.`shop_title`, `wl_shops`.`description`, `wl_shops`.`shop_image`, ";
         $query.= "`wl_shops`.`shop_banner`, `wl_shops`.`shop_announcement`, `wl_shops`.`shop_message`, `wl_shops`.`shop_address`, `wl_shops`.`shop_latitude`, ";
         $query.= "`wl_shops`.`shop_longitude`, `wl_shops`.`item_count`, `wl_shops`.`follow_count`, `wl_shops`.`welcome_message`, `wl_shops`.`payment_policy`, ";
         $query.= "`wl_shops`.`shipping_policy`, `wl_shops`.`refund_policy`, `wl_shops`.`additional_info`, `wl_shops`.`seller_info`, `wl_shops`.`phone_no`, ";
@@ -388,7 +396,7 @@ class MigrateCommand extends Command
             'user_id' => $new_user_id,
             'shop_name' => $shop['shop_name'],
             'shop_title' => $shop['shop_title'],
-            'desc' => $shop['desc'],
+            'description' => $shop['description'],
             'shop_image' => $shop['shop_image'],
             'shop_banner' => $shop['shop_banner'],
             'shop_announcement' => $shop['shop_announcement'],
@@ -479,7 +487,7 @@ class MigrateCommand extends Command
     
     protected function getPhotos(\Doctrine\DBAL\Connection $source, $item_id)
     {
-        $query = "SELECT `wl_photos`.`id`, `wl_photos`.`item_id`, `wl_photos`.`image_name`, `wl_photos`.`created_on` FROM `{$this->dbName}`.`wl_photos ";
+        $query = "SELECT `wl_photos`.`id`, `wl_photos`.`item_id`, `wl_photos`.`image_name`, `wl_photos`.`created_on` FROM `{$this->dbName}`.`wl_photos`";
         $query.= "WHERE `wl_photos`.`item_id` = ?";
         $photos = $source->executeQuery($query, array($item_id));
         
