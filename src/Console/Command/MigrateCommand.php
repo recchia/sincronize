@@ -29,6 +29,7 @@ class MigrateCommand extends Command
     private $countryId;
     private $currencyId;
     private $dbName;
+    private $targetName;
     
     public function __construct($name = null)
     {
@@ -66,6 +67,7 @@ class MigrateCommand extends Command
             $target = $this->getTargetConnection($output);
             try {
                 $this->createIdColumns($output, $target);
+                $this->fixProblemShopColumn($target, $output);
                 $this->executeFirstPhaseMigration($source, $target, $output);
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
@@ -214,6 +216,7 @@ class MigrateCommand extends Command
             'charset' => 'utf8',
             'driver' => 'pdo_mysql',
         );
+        $this->targetName = $_data['target']['dbname'];
         
         return DriverManager::getConnection($connectionParams, $config);
     }
@@ -228,13 +231,13 @@ class MigrateCommand extends Command
         $progress->setMessage("Verifying special columns");
         $progress->start();
         foreach ($_tables as $key => $value) {
-            $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'wuelto' AND TABLE_NAME = '$value' AND COLUMN_NAME = 'old_id';");
+            $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = '$value' AND COLUMN_NAME = 'old_id';");
             $exist = $sth->fetchColumn();
             if (!$exist) {
                 $progress->clear();
                 $progress->setMessage("The field does not exist in the table $key, creating...");
                 $progress->display();
-                $sth = $target->query("ALTER TABLE `wuelto`.`$value` ADD COLUMN `old_id` INT(32) NULL AFTER `{$_lastFields[$key]}`;");
+                $sth = $target->query("ALTER TABLE `{$this->targetName}`.`$value` ADD COLUMN `old_id` INT(32) NULL AFTER `{$_lastFields[$key]}`;");
                 $progress->clear();
                 $progress->setMessage("The field was created in the table $key");
                 $progress->display();
@@ -252,6 +255,33 @@ class MigrateCommand extends Command
         $output->writeln('');
     }
     
+    protected function fixProblemShopColumn(\Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Check column desc in shop table.</comment>');
+        $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_shops' AND COLUMN_NAME = 'description';");
+        $exist = $sth->fetchColumn();
+        if (!$exist) {
+            $output->writeln('<comment>Change column desc to description to fix MySQL problem.</comment>');
+            $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_shops` CHANGE COLUMN `desc` `description` VARCHAR(200) NULL DEFAULT NULL;");
+            $output->writeln('<comment>Column desc change to description.</comment>');
+        } else {
+            $output->writeln('<comment>Column desc in shop table already fixed.</comment>');
+        }
+    }
+    
+    protected function reverseShopColumn(\Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_shops' AND COLUMN_NAME = 'desc';");
+        $exist = $sth->fetchColumn();
+        if (!$exist) {
+            $output->writeln('<comment>Reverse change for column desc to description.</comment>');
+            $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_shops` CHANGE COLUMN `description` `desc` VARCHAR(200) NULL DEFAULT NULL;");
+            $output->writeln('<comment>Column description change to desc.</comment>');
+        } else {
+            $output->writeln('<comment>Column desc in shop table already reversed.</comment>');
+        }
+    }
+
     protected function executeFirstPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
         $output->writeln('');
@@ -380,7 +410,7 @@ class MigrateCommand extends Command
     
     protected function getShop(\Doctrine\DBAL\Connection $source, $user_id)
     {
-        $query = "SELECT `wl_shops`.`id`, `wl_shops`.`user_id`, `wl_shops`.`shop_name`, `wl_shops`.`shop_title`, `wl_shops`.`description`, `wl_shops`.`shop_image`, ";
+        $query = "SELECT `wl_shops`.`id`, `wl_shops`.`user_id`, `wl_shops`.`shop_name`, `wl_shops`.`shop_title`, `wl_shops`.`desc`, `wl_shops`.`shop_image`, ";
         $query.= "`wl_shops`.`shop_banner`, `wl_shops`.`shop_announcement`, `wl_shops`.`shop_message`, `wl_shops`.`shop_address`, `wl_shops`.`shop_latitude`, ";
         $query.= "`wl_shops`.`shop_longitude`, `wl_shops`.`item_count`, `wl_shops`.`follow_count`, `wl_shops`.`welcome_message`, `wl_shops`.`payment_policy`, ";
         $query.= "`wl_shops`.`shipping_policy`, `wl_shops`.`refund_policy`, `wl_shops`.`additional_info`, `wl_shops`.`seller_info`, `wl_shops`.`phone_no`, ";
@@ -396,7 +426,7 @@ class MigrateCommand extends Command
             'user_id' => $new_user_id,
             'shop_name' => $shop['shop_name'],
             'shop_title' => $shop['shop_title'],
-            'description' => $shop['description'],
+            'description' => $shop['desc'],
             'shop_image' => $shop['shop_image'],
             'shop_banner' => $shop['shop_banner'],
             'shop_announcement' => $shop['shop_announcement'],
