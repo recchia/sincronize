@@ -293,7 +293,7 @@ class MigrateCommand extends Command
         $total = $sth->fetchColumn();
         $bar = new ProgressBar($output, $total);
         $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
-        $bar->setMessage('<comment>Migrating users, stores and products...</comment>');
+        $bar->setMessage('<comment>Migrating users, stores and products and shippings...</comment>');
         $stmt = $source->query($this->getUsersQuery());
         $bar->start();
         while ($user = $stmt->fetch()) {
@@ -323,7 +323,7 @@ class MigrateCommand extends Command
             }
             $bar->advance();
         }
-        $bar->setMessage('<comment>Users, Stores and Products Migrated</comment>');
+        $bar->setMessage('<comment>Users, Stores, Products and Shippings Migrated</comment>');
         $bar->clear();
         $bar->display();
         $bar->finish();
@@ -516,6 +516,10 @@ class MigrateCommand extends Command
             if (count($photos) > 0) {
                 $this->insertPhotos($target, $photos, $new_item_id);
             }
+            $shippings = $this->getShippings($target, $item['id']);
+            if (count($shippings) > 0) {
+                $this->insertShippings($target, $shippings, $new_item_id);
+            }
         }
     }
     
@@ -542,10 +546,29 @@ class MigrateCommand extends Command
     
     protected function getShippings(\Doctrine\DBAL\Connection $source, $item_id)
     {
+        $query = "SELECT `wl_shipings`.`id`, `wl_shipings`.`item_id`, `wl_shipings`.`country_id`, `wl_shipings`.`primary_cost`, `wl_shipings`.`other_item_cost`, ";
+        $query.= "`wl_shipings`.`shipping_delivery`, `wl_shipings`.`created_on` FROM `{$this->dbName}`.`wl_shipings` WHERE `wl_shipings`.`item_id` = ?";
+        $shippings = $source->exec($query, array($item_id));
         
+        return $shippings->fetchAll(\PDO::FETCH_ASSOC);
+    }
+    
+    protected function insertShippings(\Doctrine\DBAL\Connection $target, $shippings, $new_item_id)
+    {
+        foreach ($shippings as $shipping) {
+            $_values = array(
+                'item_id' => $new_item_id,
+                'country_id' => $shipping['country_id'],
+                'primary_cost' => $shipping['primary_cost'],
+                'other_item_cost' => $shipping['other_item_cost'],
+                'shipping_delivery' => $shipping['shipping_delivery'],
+                'created_on' => $shipping['created_on']
+            );
+            $target->insert('wl_shipings', $_values);
+        }
     }
 
-        protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
         $this->migrateItemsFavs($source, $target, $output);
     }
