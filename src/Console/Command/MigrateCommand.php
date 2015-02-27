@@ -69,6 +69,7 @@ class MigrateCommand extends Command
                 $this->createIdColumns($output, $target);
                 $this->fixProblemShopColumn($target, $output);
                 $this->executeFirstPhaseMigration($source, $target, $output);
+                $this->executeSecondPhaseMigration($source, $target, $output);
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
@@ -322,6 +323,9 @@ class MigrateCommand extends Command
             }
             $bar->advance();
         }
+        $bar->setMessage('<comment>Users, Stores and Products Migrated</comment>');
+        $bar->clear();
+        $bar->display();
         $bar->finish();
         $output->writeln('');
         $output->writeln("<info>Users Total: $total</info>");
@@ -521,7 +525,7 @@ class MigrateCommand extends Command
         $query.= "WHERE `wl_photos`.`item_id` = ?";
         $photos = $source->executeQuery($query, array($item_id));
         
-        $photos->fetchAll(\PDO::FETCH_ASSOC);
+        return $photos->fetchAll(\PDO::FETCH_ASSOC);
     }
     
     protected function insertPhotos(\Doctrine\DBAL\Connection $target, $photos, $new_item_id)
@@ -534,6 +538,81 @@ class MigrateCommand extends Command
             );
             $target->insert('wl_photos', $_values);
         }
+    }
+    
+    protected function getShippings(\Doctrine\DBAL\Connection $source, $item_id)
+    {
+        
+    }
+
+        protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $this->migrateItemsFavs($source, $target, $output);
+    }
+    
+    protected function migrateItemsFavs(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Checking itemsfavs...</comment>');
+        $sth = $source->executeQuery("SELECT count(`wl_itemfavs`.`id`) as count FROM `{$this->dbName}`.`wl_itemfavs`");
+        $count = $sth->fetchColumn();
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
+        if ($count > 0) {
+            $bar = new ProgressBar($output, $count);
+            $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+            $bar->setMessage('<comment>Migrating itemfavs...</comment>');
+            $query = "SELECT `wl_itemfavs`.`id`, `wl_itemfavs`.`user_id`, `wl_itemfavs`.`item_id`, `wl_itemfavs`.`created_on` FROM `{$this->dbName}`.`wl_itemfavs`";
+            $stmt = $source->executeQuery($query);
+            $shopFavs = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            $bar->start();
+            foreach ($shopFavs as $shopFav) {
+                $strSQL = "SELECT wu.id AS user_id, wi.id AS item_id FROM {$this->targetName}.wl_users wu, wl_items wi WHERE wu.old_id = {$shopFav['user_id']} AND wi.old_id = {$shopFav['item_id']};";
+                $stmt = $target->executeQuery($strSQL);
+                $relationShip = $stmt->fetch(\PDO::FETCH_ASSOC);
+                $check = $target->executeQuery("SELECT count(`wl_itemfavs`.`id`) as count FROM `{$this->targetName}`.`wl_itemfavs` WHERE `wl_itemfavs`.`user_id` = ? AND `wl_itemfavs`.`item_id` = ?", array($relationShip['user_id'], $relationShip['item_id']));
+                $total = $check->fetchColumn();
+                try {
+                    if ($total == 0 && !empty($total)) {
+                        $this->insertItemFav($target, $shopFav, $relationShip);
+                        $success += 1;
+                    } else {
+                        $exist += 1;
+                    }
+                } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemfav {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_item_id: {$relationShip['item_id']}. Info: " . $ex->getMessage());
+                } catch (PDOException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemfav {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_item_id: {$relationShip['item_id']}. Info: " . $ex->getMessage());
+                }
+                $bar->advance();
+            }
+            $bar->setMessage('<comment>Itemfavs Migrated</comment>');
+            $bar->clear();
+            $bar->display();
+            $bar->finish();
+            $output->writeln('');
+            $output->writeln("<info>Itemfavs Total: $count</info>");
+            $output->writeln("<info>Itemfavs Migrated: $success</info>");
+            $output->writeln("<info>Itemfavs Exist: $exist</info>");
+            $output->writeln("<info>Itemfavs Not Migrated: $fails</info>");
+            if ($fails > 0) {
+                $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+            }
+        } else {
+            $output->writeln('<comment>No itemsfavs to Migrate</comment>');
+        }
+    }
+
+    protected function insertItemFav(\Doctrine\DBAL\Connection $target, $shopFav, $relationShip)
+    {
+        $_values = array(
+            'user_id' => $relationShip['user_id'],
+            'item_id' => $relationShip['item_id'],
+            'created_on' => $shopFav['created_on']
+        );
+        $target->insert('wl_itemfavs', $_values);
     }
 
 }
