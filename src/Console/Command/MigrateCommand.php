@@ -308,7 +308,7 @@ class MigrateCommand extends Command
                         $new_shop_id = $this->insertShop($target, $shop, $new_user_id);
                         $items = $this->getItems($source, $user['id'], $shop['id']);
                         if (count($items) > 0) {
-                            $this->insertItems($target, $items, $new_user_id, $new_shop_id);
+                            $this->insertItems($target, $source, $items, $new_user_id, $new_shop_id);
                         }
                     }
                     $success += 1;
@@ -472,7 +472,7 @@ class MigrateCommand extends Command
         return $items->fetchAll(\PDO::FETCH_ASSOC);
     }
     
-    protected function insertItems(\Doctrine\DBAL\Connection $target, $items, $new_user_id, $new_shop_id)
+    protected function insertItems(\Doctrine\DBAL\Connection $target, \Doctrine\DBAL\Connection $source, $items, $new_user_id, $new_shop_id)
     {
         foreach ($items as $item) {
             $_values = array(
@@ -512,11 +512,11 @@ class MigrateCommand extends Command
             );
             $target->insert('wl_items', $_values);
             $new_item_id = $target->lastInsertId();
-            $photos = $this->getPhotos($target, $item['id']);
+            $photos = $this->getPhotos($source, $item['id']);
             if (count($photos) > 0) {
                 $this->insertPhotos($target, $photos, $new_item_id);
             }
-            $shippings = $this->getShippings($target, $item['id']);
+            $shippings = $this->getShippings($source, $item['id']);
             if (count($shippings) > 0) {
                 $this->insertShippings($target, $shippings, $new_item_id);
             }
@@ -548,7 +548,7 @@ class MigrateCommand extends Command
     {
         $query = "SELECT `wl_shipings`.`id`, `wl_shipings`.`item_id`, `wl_shipings`.`country_id`, `wl_shipings`.`primary_cost`, `wl_shipings`.`other_item_cost`, ";
         $query.= "`wl_shipings`.`shipping_delivery`, `wl_shipings`.`created_on` FROM `{$this->dbName}`.`wl_shipings` WHERE `wl_shipings`.`item_id` = ?";
-        $shippings = $source->exec($query, array($item_id));
+        $shippings = $source->executeQuery($query, array($item_id));
         
         return $shippings->fetchAll(\PDO::FETCH_ASSOC);
     }
@@ -571,11 +571,12 @@ class MigrateCommand extends Command
     protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
         $this->migrateItemsFavs($source, $target, $output);
+        $this->migrateStoreFollowers($source, $target, $output);
     }
     
     protected function migrateItemsFavs(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        $output->writeln('<comment>Checking itemsfavs...</comment>');
+        $output->writeln('<comment>Checking Items Favs...</comment>');
         $sth = $source->executeQuery("SELECT count(`wl_itemfavs`.`id`) as count FROM `{$this->dbName}`.`wl_itemfavs`");
         $count = $sth->fetchColumn();
         $success = 0;
@@ -584,7 +585,7 @@ class MigrateCommand extends Command
         if ($count > 0) {
             $bar = new ProgressBar($output, $count);
             $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
-            $bar->setMessage('<comment>Migrating itemfavs...</comment>');
+            $bar->setMessage('<comment>Migrating Item Favs...</comment>');
             $query = "SELECT `wl_itemfavs`.`id`, `wl_itemfavs`.`user_id`, `wl_itemfavs`.`item_id`, `wl_itemfavs`.`created_on` FROM `{$this->dbName}`.`wl_itemfavs`";
             $stmt = $source->executeQuery($query);
             $shopFavs = $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -596,7 +597,7 @@ class MigrateCommand extends Command
                 $check = $target->executeQuery("SELECT count(`wl_itemfavs`.`id`) as count FROM `{$this->targetName}`.`wl_itemfavs` WHERE `wl_itemfavs`.`user_id` = ? AND `wl_itemfavs`.`item_id` = ?", array($relationShip['user_id'], $relationShip['item_id']));
                 $total = $check->fetchColumn();
                 try {
-                    if ($total == 0 && !empty($total)) {
+                    if ($total == 0) {
                         $this->insertItemFav($target, $shopFav, $relationShip);
                         $success += 1;
                     } else {
@@ -611,20 +612,20 @@ class MigrateCommand extends Command
                 }
                 $bar->advance();
             }
-            $bar->setMessage('<comment>Itemfavs Migrated</comment>');
+            $bar->setMessage('<comment>Item Favs Migrated</comment>');
             $bar->clear();
             $bar->display();
             $bar->finish();
             $output->writeln('');
-            $output->writeln("<info>Itemfavs Total: $count</info>");
-            $output->writeln("<info>Itemfavs Migrated: $success</info>");
-            $output->writeln("<info>Itemfavs Exist: $exist</info>");
-            $output->writeln("<info>Itemfavs Not Migrated: $fails</info>");
+            $output->writeln("<info>Item Favs Total: $count</info>");
+            $output->writeln("<info>Item Favs Migrated: $success</info>");
+            $output->writeln("<info>Itemf Favs Exist: $exist</info>");
+            $output->writeln("<info>Item Favs Not Migrated: $fails</info>");
             if ($fails > 0) {
                 $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
             }
         } else {
-            $output->writeln('<comment>No itemsfavs to Migrate</comment>');
+            $output->writeln('<comment>No Items Favs to Migrate</comment>');
         }
     }
 
@@ -636,6 +637,71 @@ class MigrateCommand extends Command
             'created_on' => $shopFav['created_on']
         );
         $target->insert('wl_itemfavs', $_values);
+    }
+    
+    protected function migrateStoreFollowers(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Checking Store Followers...</comment>');
+        $sth = $source->executeQuery("SELECT count(`wl_storefollowers`.`id`) as count FROM `{$this->dbName}`.`wl_storefollowers`");
+        $count = $sth->fetchColumn();
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
+        if ($count > 0) {
+            $bar = new ProgressBar($output, $count);
+            $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+            $bar->setMessage('<comment>Migrating Store Followers...</comment>');
+            $query = "SELECT `wl_storefollowers`.`id`, `wl_storefollowers`.`store_id`, `wl_storefollowers`.`follow_user_id`, `wl_storefollowers`.`followed_on` FROM `{$this->dbName}`.`wl_storefollowers";
+            $stmt = $source->executeQuery($query);
+            $storeFollowers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            $bar->start();
+            foreach ($storeFollowers as $storeFollower) {
+                $strSQL = "SELECT wu.id AS user_id, ws.id AS shop_id FROM {$this->targetName}.wl_users wu, wl_shops ws WHERE wu.old_id = {$storeFollower['follow_user_id']} AND ws.old_id = {$storeFollower['store_id']};";
+                $stmt = $target->executeQuery($strSQL);
+                $relationShip = $stmt->fetch(\PDO::FETCH_ASSOC);
+                $check = $target->executeQuery("SELECT count(`wl_storefollowers`.`id`) as count FROM `{$this->targetName}`.`wl_storefollowers` WHERE `wl_storefollowers`.`follow_user_id` = ? AND `wl_storefollowers`.`store_id` = ?", array($relationShip['user_id'], $relationShip['shop_id']));
+                $total = $check->fetchColumn();
+                try {
+                    if ($total == 0) {
+                        $this->insertStoreFollower($target, $storeFollower, $relationShip);
+                        $success += 1;
+                    } else {
+                        $exist += 1;
+                    }
+                } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save storefollower {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
+                } catch (PDOException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save storefollower {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
+                }
+                $bar->advance();
+            }
+            $bar->setMessage('<comment>Itemfavs Migrated</comment>');
+            $bar->clear();
+            $bar->display();
+            $bar->finish();
+            $output->writeln('');
+            $output->writeln("<info>Store Followers Total: $count</info>");
+            $output->writeln("<info>Store Followers Migrated: $success</info>");
+            $output->writeln("<info>Store Followers Exist: $exist</info>");
+            $output->writeln("<info>Store Followers Not Migrated: $fails</info>");
+            if ($fails > 0) {
+                $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+            }
+        } else {
+            $output->writeln('<comment>No Store Followers to Migrate</comment>');
+        }
+    }
+
+    protected function insertStoreFollower(\Doctrine\DBAL\Connection $target, $storeFollower, $relationShip)
+    {
+        $_values = array(
+            'store_id' => $relationShip['shop_id'],
+            'follow_user_id' => $relationShip['user_id'],
+            'followed_on' => $storeFollower['followed_on']
+        );
+        $target->insert('wl_storefollowers', $_values);
     }
 
 }
