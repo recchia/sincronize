@@ -570,8 +570,9 @@ class MigrateCommand extends Command
 
     protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        $this->migrateItemsFavs($source, $target, $output);
+        //$this->migrateItemsFavs($source, $target, $output);
         $this->migrateStoreFollowers($source, $target, $output);
+        $this->migrateFollowers($source, $target, $output);
     }
     
     protected function migrateItemsFavs(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
@@ -670,14 +671,14 @@ class MigrateCommand extends Command
                     }
                 } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
                     $fails += 1;
-                    $this->Log($this->dbName, "Couldn't save storefollower {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
+                    $this->Log($this->dbName, "Couldn't save storefollower {$storeFollower['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
                 } catch (PDOException $ex) {
                     $fails += 1;
-                    $this->Log($this->dbName, "Couldn't save storefollower {$shopFav['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
+                    $this->Log($this->dbName, "Couldn't save storefollower {$storeFollower['id']} new_user_id: {$relationShip['user_id']}, new_shop_id: {$relationShip['shop_id']}. Info: " . $ex->getMessage());
                 }
                 $bar->advance();
             }
-            $bar->setMessage('<comment>Itemfavs Migrated</comment>');
+            $bar->setMessage('<comment>Store Followers Migrated</comment>');
             $bar->clear();
             $bar->display();
             $bar->finish();
@@ -702,6 +703,74 @@ class MigrateCommand extends Command
             'followed_on' => $storeFollower['followed_on']
         );
         $target->insert('wl_storefollowers', $_values);
+    }
+    
+    protected function migrateFollowers(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Checking Followers...</comment>');
+        $sth = $source->executeQuery("SELECT count(`wl_followers`.`id`) as count FROM `{$this->dbName}`.`wl_followers`");
+        $count = $sth->fetchColumn();
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
+        if ($count > 0) {
+            $bar = new ProgressBar($output, $count);
+            $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+            $bar->setMessage('<comment>Migrating Followers...</comment>');
+            $query = "SELECT `wl_followers`.`id`, `wl_followers`.`user_id`, `wl_followers`.`follow_user_id`, `wl_followers`.`followed_on` FROM `{$this->dbName}`.`wl_followers";
+            $stmt = $source->executeQuery($query);
+            $followers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            $bar->start();
+            foreach ($followers as $follower) {
+                $strSQL = "SELECT wl_users.id AS user_id FROM {$this->targetName}.wl_users WHERE wl_users.old_id = {$follower['user_id']};";
+                $stmt = $target->executeQuery($strSQL);
+                $new_user_id = $stmt->fetchColumn();
+                $strSQL2 = "SELECT wl_users.id AS follow_user_id FROM {$this->targetName}.wl_users WHERE wl_users.old_id = {$follower['follow_user_id']};";
+                $stmt2 = $target->executeQuery($strSQL2);
+                $new_follow_user_id = $stmt2->fetchColumn();
+                $check = $target->executeQuery("SELECT count(`wl_followers`.`id`) as count FROM `{$this->targetName}`.`wl_followers` WHERE `wl_followers`.`user_id` = ? AND `wl_followers`.`follow_user_id` = ?", array($new_user_id, $new_follow_user_id));
+                $total = $check->fetchColumn();
+                try {
+                    if ($total == 0) {
+                        $this->insertFollower($target, $follower, $new_user_id, $new_follow_user_id);
+                        $success += 1;
+                    } else {
+                        $exist += 1;
+                    }
+                } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save follower {$follower['id']} new_user_id: $new_user_id, new_follower_user_id: $new_follow_user_id. Info: " . $ex->getMessage());
+                } catch (PDOException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save follower {$follower['id']} new_user_id: $new_user_id, new_follower_user_id: $new_follow_user_id. Info: " . $ex->getMessage());
+                }
+                $bar->advance();
+            }
+            $bar->setMessage('<comment>Followers Migrated</comment>');
+            $bar->clear();
+            $bar->display();
+            $bar->finish();
+            $output->writeln('');
+            $output->writeln("<info>Followers Total: $count</info>");
+            $output->writeln("<info>Followers Migrated: $success</info>");
+            $output->writeln("<info>Followers Exist: $exist</info>");
+            $output->writeln("<info>Followers Not Migrated: $fails</info>");
+            if ($fails > 0) {
+                $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+            }
+        } else {
+            $output->writeln('<comment>No Followers to Migrate</comment>');
+        }
+    }
+
+    protected function insertFollower(\Doctrine\DBAL\Connection $target, $follower, $new_user_id, $new_follow_user_id)
+    {
+        $_values = array(
+            'user_id' => $new_user_id,
+            'follow_user_id' => $new_follow_user_id,
+            'followed_on' => $follower['followed_on']
+        );
+        $target->insert('wl_followers', $_values);
     }
 
 }
