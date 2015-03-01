@@ -73,6 +73,7 @@ class MigrateCommand extends Command
                 $this->executeSecondPhaseMigration($source, $target, $output);
                 $this->reverseShopColumn($target, $output);
                 $this->reverseItemListColumn($target, $output);
+                $this->deleteIdColumns($output, $target);
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
@@ -254,6 +255,39 @@ class MigrateCommand extends Command
         }
         $progress->clear();
         $progress->setMessage('<comment>Verification finished. Special fields are ok</comment>');
+        $progress->display();
+        $progress->finish();
+        $output->writeln('');
+    }
+    
+    protected function deleteIdColumns(OutputInterface $output, $target)
+    {
+        $output->writeln('');
+        $_tables = array('users' => 'wl_users', 'shops' => 'wl_shops', 'items' => 'wl_items');
+        $progress = new ProgressBar($output, 3);
+        $progress->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+        $progress->setMessage("Verifying special columns");
+        $progress->start();
+        foreach ($_tables as $key => $value) {
+            $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = '$value' AND COLUMN_NAME = 'old_id';");
+            $exist = $sth->fetchColumn();
+            if ($exist) {
+                $progress->clear();
+                $progress->setMessage("The field does exist in the table $key, deleting...");
+                $progress->display();
+                $sth = $target->query("ALTER TABLE `{$this->targetName}`.`$value` DROP COLUMN `old_id`;");
+                $progress->clear();
+                $progress->setMessage("The field was deleted in the table $key");
+                $progress->display();
+            } else {
+                $progress->clear();
+                $progress->setMessage("The field not exist in the $key table");
+                $progress->display();
+            }
+            $progress->advance();
+        }
+        $progress->clear();
+        $progress->setMessage('<comment>Verification finished. Special fields deleted</comment>');
         $progress->display();
         $progress->finish();
         $output->writeln('');
@@ -600,10 +634,11 @@ class MigrateCommand extends Command
 
     protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        //$this->migrateItemsFavs($source, $target, $output);
-        //$this->migrateStoreFollowers($source, $target, $output);
-        //$this->migrateFollowers($source, $target, $output);
+        $this->migrateItemsFavs($source, $target, $output);
+        $this->migrateStoreFollowers($source, $target, $output);
+        $this->migrateFollowers($source, $target, $output);
         $this->migrateItemList($source, $target, $output);
+        $this->migrateStories($source, $target, $output);
     }
     
     protected function migrateItemsFavs(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
@@ -683,7 +718,7 @@ class MigrateCommand extends Command
             $bar = new ProgressBar($output, $count);
             $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
             $bar->setMessage('<comment>Migrating Store Followers...</comment>');
-            $query = "SELECT `wl_storefollowers`.`id`, `wl_storefollowers`.`store_id`, `wl_storefollowers`.`follow_user_id`, `wl_storefollowers`.`followed_on` FROM `{$this->dbName}`.`wl_storefollowers";
+            $query = "SELECT `wl_storefollowers`.`id`, `wl_storefollowers`.`store_id`, `wl_storefollowers`.`follow_user_id`, `wl_storefollowers`.`followed_on` FROM `{$this->dbName}`.`wl_storefollowers`";
             $stmt = $source->executeQuery($query);
             $storeFollowers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             $bar->start();
@@ -748,7 +783,7 @@ class MigrateCommand extends Command
             $bar = new ProgressBar($output, $count);
             $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
             $bar->setMessage('<comment>Migrating Followers...</comment>');
-            $query = "SELECT `wl_followers`.`id`, `wl_followers`.`user_id`, `wl_followers`.`follow_user_id`, `wl_followers`.`followed_on` FROM `{$this->dbName}`.`wl_followers";
+            $query = "SELECT `wl_followers`.`id`, `wl_followers`.`user_id`, `wl_followers`.`follow_user_id`, `wl_followers`.`followed_on` FROM `{$this->dbName}`.`wl_followers`";
             $stmt = $source->executeQuery($query);
             $followers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             $bar->start();
@@ -771,7 +806,10 @@ class MigrateCommand extends Command
                 } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
                     $fails += 1;
                     $this->Log($this->dbName, "Couldn't save follower {$follower['id']} new_user_id: $new_user_id, new_follower_user_id: $new_follow_user_id. Info: " . $ex->getMessage());
-                } catch (PDOException $ex) {
+                }catch (\Doctrine\DBAL\Exception\DriverException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save follower {$follower['id']}. Info: " . $ex->getMessage());
+                }  catch (PDOException $ex) {
                     $fails += 1;
                     $this->Log($this->dbName, "Couldn't save follower {$follower['id']} new_user_id: $new_user_id, new_follower_user_id: $new_follow_user_id. Info: " . $ex->getMessage());
                 }
@@ -822,7 +860,7 @@ class MigrateCommand extends Command
             $itemLists = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             $bar->start();
             foreach ($itemLists as $itemList) {
-                $_items = $this->replaceItems($target, $itemList['list_item_id'], $output);
+                $_items = $this->replaceItems($target, $itemList['list_item_id']);
                 if (is_null($_items) || empty($_items)) {
                     $fails += 1;
                     continue;
@@ -899,5 +937,96 @@ class MigrateCommand extends Command
         }
     }
     
+    protected function migrateStories(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Checking Stories...</comment>');
+        $sth = $source->executeQuery("SELECT count(`wl_stories`.`id`) as count FROM `{$this->dbName}`.`wl_stories`");
+        $count = $sth->fetchColumn();
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
+        if ($count > 0) {
+            $bar = new ProgressBar($output, $count);
+            $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+            $bar->setMessage('<comment>Migrating Stories...</comment>');
+            $query = "SELECT `wl_stories`.`id`, `wl_stories`.`userid`, `wl_stories`.`storydescription`, ";
+            $query .= "`wl_stories`.`storyitems`, `wl_stories`.`createddate` FROM `{$this->dbName}`.`wl_stories`";
+            $stmt = $source->executeQuery($query);
+            $stories = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            $bar->start();
+            foreach ($stories as $storie) {
+                $_items = $this->replaceStories($target, $storie['storyitems']);
+                if (is_null($_items) || empty($_items)) {
+                    $fails += 1;
+                    continue;
+                }
+                $query = "SELECT COUNT(`wl_stories`.`id`) FROM `{$this->targetName}`.`wl_stories` JOIN `{$this->targetName}`.`wl_users` ";
+                $query .= "ON `wl_stories`.`userid` = `wl_users`.`id` WHERE `wl_users`.`old_id` = ? ";
+                $query .= "AND `wl_stories`.`storydescription` = ? AND `wl_stories`.`storyitems` = ?";
+                $stmt = $target->executeQuery($query, array($storie['userid'], $storie['storydescription'], $_items));
+                $total = $stmt->fetchColumn();
+                try {
+                    if ($total == 0) {
+                        $strSQL = "SELECT `wl_users`.`id` FROM `{$this->targetName}`.`wl_users` WHERE `wl_users`.`old_id` = ?";
+                        $stmt = $target->executeQuery($strSQL, array($storie['userid']));
+                        $new_user_id = $stmt->fetchColumn();
+                        $this->insertStorie($target, $storie, $new_user_id, $_items);
+                        $success += 1;
+                    } else {
+                        $exist += 1;
+                    }
+                } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$storie['id']}. Info: " . $ex->getMessage());
+                } catch (\Doctrine\DBAL\Exception\DriverException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$storie['id']}. Info: " . $ex->getMessage());
+                } catch (\PDOException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$storie['id']}. Info: " . $ex->getMessage());
+                }
+                $bar->advance();
+            }
+            $bar->setMessage('<comment>Stories Migrated</comment>');
+            $bar->clear();
+            $bar->display();
+            $bar->finish();
+            $output->writeln('');
+            $output->writeln("<info>Stories Total: $count</info>");
+            $output->writeln("<info>Stories Migrated: $success</info>");
+            $output->writeln("<info>Stories Exist: $exist</info>");
+            $output->writeln("<info>Stories Not Migrated: $fails</info>");
+            if ($fails > 0) {
+                $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+            }
+        } else {
+            $output->writeln('<comment>Stories to Migrate</comment>');
+        }
+    }
 
+    protected function insertStorie(\Doctrine\DBAL\Connection $target, $storie, $new_user_id, $_items)
+    {
+        $_values = array(
+            'userid' => $new_user_id,
+            'storydescription' => $storie['storydescription'],
+            'storyitems' => $storie['storyitems'],
+            'createddate' => $storie['createddate']
+        );
+        $target->insert('wl_stories', $_values);
+    }
+    
+    protected function replaceStories(\Doctrine\DBAL\Connection $target, $items)
+    {
+        $_items = json_decode($items);
+        $dbname = $this->targetName;
+        if(is_array($_items)) {
+            array_walk($_items, function(&$item) use ($target, $dbname) {
+                $query = "SELECT `wl_items`.`id` FROM `$dbname`.`wl_items` WHERE `wl_items`.`old_id` = ?";
+                $stmt = $target->executeQuery($query, array($item));
+                $new_value = $stmt->fetchColumn();
+                $item = (!$new_value) ? $item : $new_value;
+            });
+            return json_encode($_items);
+        }
+    }
 }
