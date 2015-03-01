@@ -68,8 +68,11 @@ class MigrateCommand extends Command
             try {
                 $this->createIdColumns($output, $target);
                 $this->fixProblemShopColumn($target, $output);
+                $this->fixProblemItemListColumn($target, $output);
                 $this->executeFirstPhaseMigration($source, $target, $output);
                 $this->executeSecondPhaseMigration($source, $target, $output);
+                $this->reverseShopColumn($target, $output);
+                $this->reverseItemListColumn($target, $output);
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
@@ -102,7 +105,7 @@ class MigrateCommand extends Command
         $dbname = $this->doQuestion($input, $output, 'Please enter the database name: ', 'Must enter a database name');
         $user = $this->doQuestion($input, $output, 'Please enter the username: ', 'Must enter a username');
         $password = $this->doQuestion($input, $output, 'Please enter the password: ', 'Must enter a password');
-        $config = array('source' => array('host' => $host, 'dbname' => $dbname, 'user' => $user, 'password' => $password));
+        $config = array('target' => array('host' => $host, 'dbname' => $dbname, 'user' => $user, 'password' => $password));
         try {
             $dumper = new Dumper();
             $yaml = $dumper->dump($config, 2);
@@ -258,15 +261,15 @@ class MigrateCommand extends Command
     
     protected function fixProblemShopColumn(\Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
-        $output->writeln('<comment>Check column desc in shop table.</comment>');
+        $output->writeln('<info>Check column desc in shop table.</info>');
         $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_shops' AND COLUMN_NAME = 'description';");
         $exist = $sth->fetchColumn();
         if (!$exist) {
-            $output->writeln('<comment>Change column desc to description to fix MySQL problem.</comment>');
+            $output->writeln('<info>Change column desc to description to fix MySQL problem.</info>');
             $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_shops` CHANGE COLUMN `desc` `description` VARCHAR(200) NULL DEFAULT NULL;");
-            $output->writeln('<comment>Column desc change to description.</comment>');
+            $output->writeln('<info>Column desc change to description.</info>');
         } else {
-            $output->writeln('<comment>Column desc in shop table already fixed.</comment>');
+            $output->writeln('<info>Column desc in shop table already fixed.</info>');
         }
     }
     
@@ -275,11 +278,38 @@ class MigrateCommand extends Command
         $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_shops' AND COLUMN_NAME = 'desc';");
         $exist = $sth->fetchColumn();
         if (!$exist) {
-            $output->writeln('<comment>Reverse change for column desc to description.</comment>');
+            $output->writeln('<info>Reverse change for column desc to description.</info>');
             $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_shops` CHANGE COLUMN `description` `desc` VARCHAR(200) NULL DEFAULT NULL;");
-            $output->writeln('<comment>Column description change to desc.</comment>');
+            $output->writeln('<info>Column description change to desc.</info>');
         } else {
-            $output->writeln('<comment>Column desc in shop table already reversed.</comment>');
+            $output->writeln('<info>Column desc in shop table already reversed.</info>');
+        }
+    }
+    
+    protected function fixProblemItemListColumn(\Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<info>Check column desc in itemlist table.</info>');
+        $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_itemlists' AND COLUMN_NAME = 'description';");
+        $exist = $sth->fetchColumn();
+        if (!$exist) {
+            $output->writeln('<info>Change column desc to description to fix MySQL problem.</info>');
+            $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_itemlists` CHANGE COLUMN `desc` `description` VARCHAR(250) NULL DEFAULT NULL;");
+            $output->writeln('<info>Column desc change to description.</info>');
+        } else {
+            $output->writeln('<info>Column desc in itemlist table already fixed.</info>');
+        }
+    }
+    
+    protected function reverseItemListColumn(\Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $sth = $target->query("SELECT count(*) as 'exist' FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '{$this->targetName}' AND TABLE_NAME = 'wl_itemlists' AND COLUMN_NAME = 'desc';");
+        $exist = $sth->fetchColumn();
+        if (!$exist) {
+            $output->writeln('<info>Reverse change for column desc to description.</info>');
+            $sth = $target->query("ALTER TABLE `{$this->targetName}`.`wl_itemlists` CHANGE COLUMN `description` `desc` VARCHAR(250) NULL DEFAULT NULL;");
+            $output->writeln('<info>Column description change to desc.</info>');
+        } else {
+            $output->writeln('<info>Column desc in itemlist table already reversed.</info>');
         }
     }
 
@@ -571,8 +601,9 @@ class MigrateCommand extends Command
     protected function executeSecondPhaseMigration(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
     {
         //$this->migrateItemsFavs($source, $target, $output);
-        $this->migrateStoreFollowers($source, $target, $output);
-        $this->migrateFollowers($source, $target, $output);
+        //$this->migrateStoreFollowers($source, $target, $output);
+        //$this->migrateFollowers($source, $target, $output);
+        $this->migrateItemList($source, $target, $output);
     }
     
     protected function migrateItemsFavs(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
@@ -772,5 +803,101 @@ class MigrateCommand extends Command
         );
         $target->insert('wl_followers', $_values);
     }
+    
+    protected function migrateItemList(\Doctrine\DBAL\Connection $source, \Doctrine\DBAL\Connection $target, OutputInterface $output)
+    {
+        $output->writeln('<comment>Checking Items List...</comment>');
+        $sth = $source->executeQuery("SELECT count(`wl_itemlists`.`id`) as count FROM `{$this->dbName}`.`wl_itemlists`");
+        $count = $sth->fetchColumn();
+        $success = 0;
+        $fails = 0;
+        $exist = 0;
+        if ($count > 0) {
+            $bar = new ProgressBar($output, $count);
+            $bar->setFormat("<comment> %message%\n %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%</comment>");
+            $bar->setMessage('<comment>Migrating Items List...</comment>');
+            $query = "SELECT `wl_itemlists`.`id`, `wl_itemlists`.`user_id`, `wl_itemlists`.`lists`, `wl_itemlists`.`list_item_id`, ";
+            $query .= "`wl_itemlists`.`desc`, `wl_itemlists`.`user_create_list`, `wl_itemlists`.`created_on` FROM `{$this->dbName}`.`wl_itemlists`";
+            $stmt = $source->executeQuery($query);
+            $itemLists = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            $bar->start();
+            foreach ($itemLists as $itemList) {
+                $_items = $this->replaceItems($target, $itemList['list_item_id'], $output);
+                if (is_null($_items) || empty($_items)) {
+                    $fails += 1;
+                    continue;
+                }
+                $query = "SELECT COUNT(`wl_itemlists`.`id`) FROM `{$this->targetName}`.`wl_itemlists` JOIN `{$this->targetName}`.`wl_users` ";
+                $query .= "ON `wl_itemlists`.`user_id` = `wl_users`.`id` WHERE `wl_users`.`old_id` = ? ";
+                $query .= "AND `wl_itemlists`.`lists` = ? AND `wl_itemlists`.`list_item_id` = ?";
+                $stmt = $target->executeQuery($query, array($itemList['user_id'], $itemList['lists'], $_items));
+                $total = $stmt->fetchColumn();
+                try {
+                    if ($total == 0) {
+                        $strSQL = "SELECT `wl_users`.`id` FROM `{$this->targetName}`.`wl_users` WHERE `wl_users`.`old_id` = ?";
+                        $stmt = $target->executeQuery($strSQL, array($itemList['user_id']));
+                        $new_user_id = $stmt->fetchColumn();
+                        $this->insertItemList($target, $itemList, $new_user_id, $_items);
+                        $success += 1;
+                    } else {
+                        $exist += 1;
+                    }
+                } catch (\Doctrine\DBAL\Exception\NotNullConstraintViolationException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$itemList['id']}. Info: " . $ex->getMessage());
+                } catch (\Doctrine\DBAL\Exception\DriverException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$itemList['id']}. Info: " . $ex->getMessage());
+                } catch (\PDOException $ex) {
+                    $fails += 1;
+                    $this->Log($this->dbName, "Couldn't save itemlists {$itemList['id']}. Info: " . $ex->getMessage());
+                }
+                $bar->advance();
+            }
+            $bar->setMessage('<comment>Items List Migrated</comment>');
+            $bar->clear();
+            $bar->display();
+            $bar->finish();
+            $output->writeln('');
+            $output->writeln("<info>Items List Total: $count</info>");
+            $output->writeln("<info>Items List Migrated: $success</info>");
+            $output->writeln("<info>Items List Exist: $exist</info>");
+            $output->writeln("<info>Items List Not Migrated: $fails</info>");
+            if ($fails > 0) {
+                $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
+            }
+        } else {
+            $output->writeln('<comment>No Items List to Migrate</comment>');
+        }
+    }
+
+    protected function insertItemList(\Doctrine\DBAL\Connection $target, $itemList, $new_user_id, $_items)
+    {
+        $_values = array(
+            'user_id' => $new_user_id,
+            'lists' => $itemList['lists'],
+            'list_item_id' => $_items,
+            'description' => $itemList['desc'],
+            'user_create_list' => $itemList['user_create_list'],
+            'created_on' => $itemList['created_on'],
+        );
+        $target->insert('wl_itemlists', $_values);
+    }
+    
+    protected function replaceItems(\Doctrine\DBAL\Connection $target, $items)
+    {
+        $_items = json_decode($items);
+        $dbname = $this->targetName;
+        if(is_array($_items)) {
+            array_walk($_items, function(&$item) use ($target, $dbname) {
+                $query = "SELECT `wl_items`.`id` FROM `$dbname`.`wl_items` WHERE `wl_items`.`old_id` = ?";
+                $stmt = $target->executeQuery($query, array($item));
+                $new_value = $stmt->fetchColumn();
+                $item = (!$new_value) ? $item : $new_value;
+            });
+            return json_encode($_items);
+        }
+    }
+    
 
 }
