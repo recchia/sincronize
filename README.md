@@ -61,6 +61,10 @@ ser migrado. Si los archivos de configuración del pais fuente y la base
 de datos destino no existen la aplicación los creara por ti, solicitando 
 los datos necesarios para generar el archivo.
 
+### Ejemplo:
+
+![Imagen](http://www.efectobinario.com/sincroniza.png)
+
 [1]:  http://getcomposer.org/
 [2]:  https://github.com/symfony/Console
 [3]:  https://github.com/symfony/Filesystem
