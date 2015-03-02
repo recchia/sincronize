@@ -1000,7 +1000,7 @@ class MigrateCommand extends Command
                 $output->writeln("<comment>Check {$this->dbName}.log file for more info</comment>");
             }
         } else {
-            $output->writeln('<comment>Stories to Migrate</comment>');
+            $output->writeln('<comment>No Stories to Migrate</comment>');
         }
     }
 
