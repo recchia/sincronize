@@ -43,7 +43,8 @@ class MigrateCommand extends Command
                 ->setName("wuelto:migrate")
                 ->setDescription("Migrate Wuelto Databases from different Countries")
                 ->addArgument("country", InputArgument::REQUIRED, "Country Name For Migration")
-                ->addOption("delete-duplicate-target", "ddt", InputOption::VALUE_NONE, "If set, delete duplicate on target database")
+                ->addOption("delete-fields", "df", InputOption::VALUE_NONE, "If set, delete special columns")
+                ->addOption("relations", "rel", InputOption::VALUE_NONE, "If set, migrate relation's tables")
         ;
     }
     
@@ -70,10 +71,14 @@ class MigrateCommand extends Command
                 $this->fixProblemShopColumn($target, $output);
                 $this->fixProblemItemListColumn($target, $output);
                 $this->executeFirstPhaseMigration($source, $target, $output);
-                $this->executeSecondPhaseMigration($source, $target, $output);
+                if ($input->getOption('relations')) {
+                    $this->executeSecondPhaseMigration($source, $target, $output);
+                }
                 $this->reverseShopColumn($target, $output);
                 $this->reverseItemListColumn($target, $output);
-                $this->deleteIdColumns($output, $target);
+                if ($input->getOption('delete-fields')) {
+                    $this->deleteIdColumns($output, $target);
+                }
             } catch (ConnectionException $e) {
                 $output->writeln('<error>' . $e->getMessage() . '</error>');
             } catch (PDOException $e) {
