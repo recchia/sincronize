@@ -930,15 +930,18 @@ class MigrateCommand extends Command
     protected function replaceItems(\Doctrine\DBAL\Connection $target, $items)
     {
         $_items = json_decode($items);
-        $dbname = $this->targetName;
         if(is_array($_items)) {
-            array_walk($_items, function(&$item) use ($target, $dbname) {
-                $query = "SELECT `wl_items`.`id` FROM `$dbname`.`wl_items` WHERE `wl_items`.`old_id` = ?";
+            $_array = array();
+            foreach ($_items as $item) {
+                $query = "SELECT `wl_items`.`id` FROM `{$this->targetName}`.`wl_items` WHERE `wl_items`.`old_id` = ?";
                 $stmt = $target->executeQuery($query, array($item));
                 $new_value = $stmt->fetchColumn();
-                $item = (!$new_value) ? $item : $new_value;
-            });
-            return json_encode($_items);
+                if(!empty($new_value)) {
+                    $_array[] = $new_value;
+                }
+            }
+            
+            return json_encode($_array);
         }
     }
     
@@ -1023,15 +1026,18 @@ class MigrateCommand extends Command
     protected function replaceStories(\Doctrine\DBAL\Connection $target, $items)
     {
         $_items = json_decode($items);
-        $dbname = $this->targetName;
         if(is_array($_items)) {
-            array_walk($_items, function(&$item) use ($target, $dbname) {
-                $query = "SELECT `wl_items`.`id` FROM `$dbname`.`wl_items` WHERE `wl_items`.`old_id` = ?";
+            $_array = array();
+            foreach ($_items as $item) {
+                $query = "SELECT `wl_items`.`id` FROM `{$this->targetName}`.`wl_items` WHERE `wl_items`.`old_id` = ?";
                 $stmt = $target->executeQuery($query, array($item));
                 $new_value = $stmt->fetchColumn();
-                $item = (!$new_value) ? $item : $new_value;
-            });
-            return json_encode($_items);
+                if(!empty($new_value)) {
+                    $_array[] = $new_value;
+                }
+            }
+            
+            return json_encode($_array);
         }
     }
 }
