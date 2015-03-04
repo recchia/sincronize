@@ -37,7 +37,7 @@ class FixCommand extends Command
         $success = 0;
         $fails = 0;
         $target = $this->getTargetConnection($output);
-        $strSQL = "SELECT COUNT(`wl_items`.`id`) FROM `wuelto`.`wl_items`;";
+        $strSQL = "SELECT COUNT(`wl_items`.`id`) FROM `wl_items`;";
         $stmt = $target->query($strSQL);
         $total = $stmt->fetchColumn();
         if ($total > 0) {
