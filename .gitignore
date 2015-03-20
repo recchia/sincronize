@@ -2,3 +2,4 @@
 /nbproject
 /config/*.yml
 /log/*.log
+composer.lock
